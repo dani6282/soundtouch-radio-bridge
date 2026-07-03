@@ -6,6 +6,9 @@ May 2026.
 
 Note: this needs a small server running on your local network.
 
+Transparency note: this is an alpha, AI-assisted project developed with OpenAI
+Codex under human direction and tested on one real SoundTouch setup.
+
 The Python package and command-line tool are named `soundtouch-radio`.
 
 ![Technical illustration of a silver SoundTouch-style radio](docs/assets/soundtouch-radio-illustration.jpg)
@@ -323,3 +326,7 @@ uv build
 `0.2.0a1` is an alpha release. It is useful, tested on one SoundTouch 20 setup,
 and intentionally conservative, but it still needs broader device and firmware
 feedback.
+
+The implementation and documentation were developed with substantial assistance
+from OpenAI Codex in an interactive workflow. The project is published because
+it works on the author's hardware, not because it has broad device coverage yet.
