@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+work/
+stations.toml
+backups/*.json
+backups/*.xml
+!backups/.gitkeep

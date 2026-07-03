@@ -1,0 +1,31 @@
+[device]
+host = "192.0.2.10"
+api_port = 8090
+dlna_port = 8091
+name = "Kitchen SoundTouch"
+
+[[station]]
+slot = 1
+name = "Example Radio One"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://stream.example.com/radio-one.mp3"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "/local/aux"
+marker_name = "AUX IN 1"
+homepage = "https://example.com/radio-one"
+codec = "MP3"
+
+[[station]]
+slot = 2
+name = "Example Radio Two"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://stream.example.com/radio-two.mp3"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "AUX"
+marker_name = "AUX IN 2"
+homepage = "https://example.com/radio-two"
+codec = "MP3"

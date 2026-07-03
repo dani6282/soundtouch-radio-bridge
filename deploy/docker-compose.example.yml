@@ -1,0 +1,35 @@
+name: soundtouch-radio
+
+services:
+  soundtouch-radio:
+    build:
+      context: ..
+    image: soundtouch-radio:local
+    restart: unless-stopped
+    init: true
+    # Needed only when the web UI should persist station edits to the mounted
+    # TOML file. Match these to the host file owner.
+    user: "${SOUNDTOUCH_UID:-1000}:${SOUNDTOUCH_GID:-1000}"
+    # Host networking is the simplest Linux deployment model for LAN-only
+    # SoundTouch devices. On Docker Desktop, adapt this to your local network.
+    network_mode: host
+    command:
+      - --stations
+      - /app/config/stations.toml
+      - serve
+      - --bind
+      - 0.0.0.0
+      - --web-port
+      - "8788"
+      - --playback-method
+      - dlna
+      - --recovery-window
+      - "0"
+      - --settle
+      - "1"
+    volumes:
+      # Use :ro for a headless bridge. Use read-write if the web UI should
+      # persist station name/URL edits.
+      - ./stations.toml:/app/config/stations.toml
+    security_opt:
+      - no-new-privileges:true

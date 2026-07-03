@@ -1,0 +1,83 @@
+[device]
+host = "192.0.2.10"
+api_port = 8090
+dlna_port = 8091
+name = "Berlin SoundTouch"
+
+[[station]]
+slot = 1
+name = "rbb24 Inforadio"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://dispatcher.rndfnk.com/rbb/inforadio/live/mp3/mid"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "/local/aux"
+marker_name = "AUX IN 1"
+homepage = "https://www.inforadio.de/"
+codec = "MP3"
+
+[[station]]
+slot = 2
+name = "104.6 RTL Berlin"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://stream.104.6rtl.com/rtl-live/mp3-192/radio-browser.info/"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "AUX"
+marker_name = "AUX IN 2"
+homepage = "https://www.104.6rtl.com/"
+codec = "MP3"
+
+[[station]]
+slot = 3
+name = "rbb 88.8"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://dispatcher.rndfnk.com/rbb/rbb888/live/mp3/mid"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "/local/aux/3"
+marker_name = "AUX IN 3"
+homepage = "https://www.rbb888.de/"
+codec = "MP3"
+
+[[station]]
+slot = 4
+name = "radioeins"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://dispatcher.rndfnk.com/rbb/radioeins/live/mp3/mid"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "/local/aux/4"
+marker_name = "AUX IN 4"
+homepage = "https://www.radioeins.de/"
+codec = "MP3"
+
+[[station]]
+slot = 5
+name = "Fritz"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://dispatcher.rndfnk.com/rbb/fritz/live/mp3/mid"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "AUX_5"
+marker_name = "AUX IN 5"
+homepage = "https://www.fritz.de/"
+codec = "MP3"
+
+[[station]]
+slot = 6
+name = "94,3 rs2"
+source = "UPNP"
+source_account = "UPnPUserName"
+location = "http://stream.rs2.de/rs2/mp3-128/internetradio/"
+marker_source = "AUX"
+marker_source_account = "AUX"
+marker_location = "AUX_6"
+marker_name = "AUX IN 6"
+homepage = "https://www.rs2.de/"
+codec = "MP3"
