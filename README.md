@@ -1,10 +1,12 @@
-# soundtouch-radio
+# soundtouch-radio-bridge
 
 Restore Bose SoundTouch physical preset buttons to direct web radio streams
 without depending on Bose-hosted radio catalogs, whose cloud support ended in
 May 2026.
 
 Note: this needs a small server running on your local network.
+
+The Python package and command-line tool are named `soundtouch-radio`.
 
 ![Technical illustration of a silver SoundTouch-style radio](docs/assets/soundtouch-radio-illustration.jpg)
 
