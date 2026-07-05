@@ -804,10 +804,6 @@ pre {
 
 
 APP_JS = """
-const state = {
-  stationRenderBlocked: false,
-};
-
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },

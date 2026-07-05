@@ -30,7 +30,7 @@ def save_station_config(path: Path, device: DeviceConfig | None, stations: list[
     _validate_stations(stations)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
-    tmp_path.write_text(station_config_to_toml(device, stations))
+    tmp_path.write_text(station_config_to_toml(device, stations), encoding="utf-8")
     tmp_path.replace(path)
 
 

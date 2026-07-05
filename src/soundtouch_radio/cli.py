@@ -11,6 +11,8 @@ import time
 from .bridge import DEFAULT_PLAYBACK_METHOD, BridgeState, bridge_once, run_websocket_bridge
 from .config import DEFAULT_CONFIG_PATH, load_station_config, parse_slots, station_by_slot
 from .models import (
+    DeviceConfig,
+    Station,
     station_to_content_item_xml,
     station_to_marker_content_item_xml,
     station_to_preset_xml,
@@ -349,7 +351,7 @@ def run(args: argparse.Namespace) -> Any:
         method = args.method.upper()
         if method != "GET" and not args.yes:
             raise ValueError("raw write request requires --yes")
-        body = args.body_file.read_text() if args.body_file else None
+        body = args.body_file.read_text(encoding="utf-8") if args.body_file else None
         response = client.request(method, args.path, body)
         return response.to_dict()
 
@@ -357,7 +359,7 @@ def run(args: argparse.Namespace) -> Any:
 
 
 def _doctor(
-    args: argparse.Namespace, device_config: object | None, stations: list[object]
+    args: argparse.Namespace, device_config: DeviceConfig | None, stations: list[Station]
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "ok": True,
@@ -376,38 +378,40 @@ def _doctor(
     return result
 
 
-def _client(args: argparse.Namespace, device_config: object | None) -> SoundTouchClient:
+def _client(args: argparse.Namespace, device_config: DeviceConfig | None) -> SoundTouchClient:
     host = _resolve_host(args, device_config)
     if not host:
         raise ValueError("SoundTouch host missing; set --host, SOUNDTOUCH_HOST, or [device].host")
     port = (
         args.port
-        or getattr(device_config, "api_port", None)
+        or (device_config.api_port if device_config else None)
         or int(os.getenv("SOUNDTOUCH_PORT", "8090"))
     )
     dlna_port = (
         args.dlna_port
-        or getattr(device_config, "dlna_port", None)
+        or (device_config.dlna_port if device_config else None)
         or int(os.getenv("SOUNDTOUCH_DLNA_PORT", "8091"))
     )
     return SoundTouchClient(host=host, port=int(port), dlna_port=int(dlna_port))
 
 
-def _resolve_host(args: argparse.Namespace, device_config: object | None) -> str | None:
-    return args.host or os.getenv("SOUNDTOUCH_HOST") or getattr(device_config, "host", None)
+def _resolve_host(args: argparse.Namespace, device_config: DeviceConfig | None) -> str | None:
+    return (
+        args.host or os.getenv("SOUNDTOUCH_HOST") or (device_config.host if device_config else None)
+    )
 
 
-def _host_source(args: argparse.Namespace, device_config: object | None) -> str:
+def _host_source(args: argparse.Namespace, device_config: DeviceConfig | None) -> str:
     if args.host:
         return "flag"
     if os.getenv("SOUNDTOUCH_HOST"):
         return "env"
-    if getattr(device_config, "host", None):
+    if device_config is not None and device_config.host:
         return "config"
     return "missing"
 
 
-def _load_config_if_present(path: Path) -> tuple[object | None, list[Any]]:
+def _load_config_if_present(path: Path) -> tuple[DeviceConfig | None, list[Station]]:
     if not path.exists():
         return None, []
     return load_station_config(path)

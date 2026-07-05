@@ -11,6 +11,7 @@ import json
 import time
 import xml.etree.ElementTree as ET
 
+from . import __version__
 from .models import (
     Preset,
     Station,
@@ -22,6 +23,8 @@ from .models import (
     station_to_content_item_xml,
     station_to_preset_xml,
 )
+
+USER_AGENT = f"soundtouch-radio/{__version__}"
 
 
 class SoundTouchError(RuntimeError):
@@ -95,9 +98,11 @@ class SoundTouchClient:
         xml_path = out_dir / f"soundtouch-presets-{self.host}-{timestamp}.xml"
         json_path = out_dir / f"soundtouch-presets-{self.host}-{timestamp}.json"
         xml_text = self.presets_xml()
-        xml_path.write_text(xml_text)
+        xml_path.write_text(xml_text, encoding="utf-8")
         presets = [preset.to_dict() for preset in parse_presets_xml(xml_text)]
-        json_path.write_text(json.dumps({"host": self.host, "presets": presets}, indent=2))
+        json_path.write_text(
+            json.dumps({"host": self.host, "presets": presets}, indent=2), encoding="utf-8"
+        )
         return {"xml": str(xml_path), "json": str(json_path)}
 
     def select_station(self, station: Station) -> HttpResult:
@@ -115,7 +120,7 @@ class SoundTouchClient:
             data=body.encode("utf-8"),
             method="POST",
             headers={
-                "User-Agent": "soundtouch-radio/0.1",
+                "User-Agent": USER_AGENT,
                 "Accept": "*/*",
                 "Content-Type": 'text/xml; charset="utf-8"',
                 "HOST": f"{self.host}:{self.dlna_port}",
@@ -147,7 +152,7 @@ class SoundTouchClient:
             method=method.upper(),
             headers={
                 "Content-Type": "text/xml",
-                "User-Agent": "soundtouch-radio/0.1",
+                "User-Agent": USER_AGENT,
             },
         )
         try:
@@ -186,7 +191,7 @@ def validate_stream_url(url: str, timeout: float = 8.0) -> dict[str, Any]:
     request = Request(
         url,
         method="GET",
-        headers={"Range": "bytes=0-1023", "User-Agent": "soundtouch-radio/0.1"},
+        headers={"Range": "bytes=0-1023", "User-Agent": USER_AGENT},
     )
     try:
         with urlopen(request, timeout=timeout) as response:

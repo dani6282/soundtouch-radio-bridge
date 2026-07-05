@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "soundtouch-radio"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Restore Bose SoundTouch preset buttons to local web radio streams."
 readme = "README.md"
 requires-python = ">=3.11"

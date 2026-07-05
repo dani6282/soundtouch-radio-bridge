@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0a2 - 2026-07-05
+
+- Single-source the package version from installed metadata instead of a
+  hard-coded value.
+- Derive the outbound HTTP `User-Agent` from the package version.
+- Add continuous integration (ruff lint, ruff format check, and pytest on
+  Python 3.11 and 3.12) plus a tag-triggered release build.
+- Ship a PEP 561 `py.typed` marker so downstream type checkers use the hints.
+- Use explicit UTF-8 encoding for station-config and preset-backup file I/O.
+- Tighten CLI typing to use `DeviceConfig` instead of `object`.
+
 ## 0.2.0a1 - 2026-07-03
 
 - Add `soundtouch-radio serve` with a private-LAN web control panel.
