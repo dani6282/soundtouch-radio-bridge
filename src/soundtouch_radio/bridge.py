@@ -110,7 +110,7 @@ def bridge_station_marker(
     state: BridgeState,
     *,
     now_selection: dict[str, Any],
-    now_playing: dict[str, Any] | None,
+    now_playing: dict[str, Any],
     cooldown: float,
     settle: float,
     trigger_source: str,
@@ -120,8 +120,7 @@ def bridge_station_marker(
     playback_method: PlaybackMethod,
 ) -> dict[str, Any]:
     same_stream_is_playing = (
-        now_playing is not None
-        and now_playing.get("content_location") == station.location
+        now_playing.get("content_location") == station.location
         and now_playing.get("play_status") == "PLAY_STATE"
     )
     if skip_already_playing and same_stream_is_playing:
@@ -136,28 +135,15 @@ def bridge_station_marker(
             "now_selection": now_selection,
             "now_playing": now_playing,
         }
-    if (
-        require_active_selection
-        and now_playing is not None
-        and not selection_looks_active(
-            now_selection,
-            now_playing,
-            station,
-            state,
-        )
+    if require_active_selection and not selection_looks_active(
+        now_selection,
+        now_playing,
+        station,
+        state,
     ):
         return {
             "triggered": False,
             "reason": "stale_selection",
-            "trigger_source": trigger_source,
-            "station": station.to_dict(),
-            "now_selection": now_selection,
-            "now_playing": now_playing,
-        }
-    if require_active_selection and now_playing is None:
-        return {
-            "triggered": False,
-            "reason": "missing_now_playing",
             "trigger_source": trigger_source,
             "station": station.to_dict(),
             "now_selection": now_selection,
@@ -220,9 +206,9 @@ def bridge_websocket_message(
     now_selection = parse_now_selection_update_xml(message)
     if now_selection is None:
         return None
+    now_playing = client.now_playing()
     station = station_for_now_selection(now_selection, stations)
     if station is None:
-        now_playing = client.now_playing()
         return {
             "triggered": False,
             "reason": "no_configured_marker",
@@ -235,7 +221,7 @@ def bridge_websocket_message(
         station,
         state,
         now_selection=now_selection,
-        now_playing=None,
+        now_playing=now_playing,
         cooldown=0,
         settle=settle,
         trigger_source="websocket_now_selection",
