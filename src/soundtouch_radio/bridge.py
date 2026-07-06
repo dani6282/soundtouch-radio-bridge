@@ -43,6 +43,79 @@ def station_for_now_selection(
     return None
 
 
+def playback_check_for_target(
+    *,
+    expected_source: str,
+    expected_location: str,
+    now_playing: dict[str, Any] | None,
+    status: int | None = None,
+) -> dict[str, Any]:
+    observed = now_playing or {}
+    observed_source = observed.get("source")
+    observed_location = observed.get("content_location")
+    observed_play_status = observed.get("play_status")
+    transport_accepted = None
+    if status is not None:
+        transport_accepted = 200 <= status < 300
+        if not transport_accepted:
+            return {
+                "plausible": False,
+                "reason": "transport_not_accepted",
+                "transport_accepted": transport_accepted,
+                "status": status,
+                "expected_source": expected_source,
+                "expected_location": expected_location,
+                "observed_source": observed_source,
+                "observed_location": observed_location,
+                "observed_play_status": observed_play_status,
+            }
+
+    reason = "target_stream_selected"
+    plausible = (
+        observed_source == expected_source
+        and observed_location == expected_location
+        and observed_play_status not in {"PAUSE_STATE", "STOP_STATE"}
+    )
+    if not plausible:
+        if not observed:
+            reason = "missing_now_playing"
+        elif observed_source == "AUX":
+            reason = "source_stayed_aux"
+        elif observed_source == "STANDBY":
+            reason = "source_stayed_standby"
+        elif observed_source == "INVALID_SOURCE":
+            reason = "invalid_source"
+        elif observed_source != expected_source:
+            reason = "wrong_source"
+        elif observed_location != expected_location:
+            reason = "wrong_location"
+        else:
+            reason = "target_stream_not_playing"
+
+    return {
+        "plausible": plausible,
+        "reason": reason,
+        "transport_accepted": transport_accepted,
+        "status": status,
+        "expected_source": expected_source,
+        "expected_location": expected_location,
+        "observed_source": observed_source,
+        "observed_location": observed_location,
+        "observed_play_status": observed_play_status,
+    }
+
+
+def playback_check_for_station(
+    station: Station, now_playing: dict[str, Any] | None, *, status: int | None = None
+) -> dict[str, Any]:
+    return playback_check_for_target(
+        expected_source=station.source,
+        expected_location=station.location,
+        now_playing=now_playing,
+        status=status,
+    )
+
+
 def selection_key(now_selection: dict[str, Any]) -> tuple[int | None, str | None]:
     return (now_selection.get("preset_id"), now_selection.get("content_location"))
 
@@ -171,6 +244,7 @@ def bridge_station_marker(
     state.last_selection_key = selection_key(now_selection)
     if settle > 0:
         sleep(settle)
+    after = client.now_playing()
     return {
         "triggered": True,
         "trigger_source": trigger_source,
@@ -178,7 +252,8 @@ def bridge_station_marker(
         "status": response.status,
         "now_selection": now_selection,
         "before": now_playing,
-        "after": client.now_playing(),
+        "after": after,
+        "playback_check": playback_check_for_station(station, after, status=response.status),
     }
 
 

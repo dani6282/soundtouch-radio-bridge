@@ -4,6 +4,8 @@ from soundtouch_radio.bridge import (
     BridgeState,
     bridge_once,
     bridge_websocket_message,
+    playback_check_for_station,
+    playback_check_for_target,
     station_for_now_playing,
     station_for_now_selection,
 )
@@ -33,6 +35,41 @@ def test_station_for_now_selection_matches_preset_id() -> None:
     assert result == station
 
 
+def test_playback_check_accepts_target_stream_buffering() -> None:
+    check = playback_check_for_target(
+        expected_source="UPNP",
+        expected_location="http://example.test/live.mp3",
+        now_playing={
+            "source": "UPNP",
+            "content_location": "http://example.test/live.mp3",
+            "play_status": "BUFFERING_STATE",
+        },
+        status=200,
+    )
+
+    assert check["plausible"] is True
+    assert check["reason"] == "target_stream_selected"
+
+
+def test_playback_check_flags_dlna_accepted_but_source_stayed_aux() -> None:
+    station = Station(slot=1, name="Radio", location="http://example.test/live.mp3")
+
+    check = playback_check_for_station(
+        station,
+        {
+            "source": "AUX",
+            "content_location": "/local/aux",
+            "play_status": "PLAY_STATE",
+        },
+        status=200,
+    )
+
+    assert check["plausible"] is False
+    assert check["transport_accepted"] is True
+    assert check["reason"] == "source_stayed_aux"
+    assert check["expected_location"] == "http://example.test/live.mp3"
+
+
 def test_bridge_once_triggers_select_when_marker_is_not_playing() -> None:
     station = Station(slot=1, name="Radio", location="http://example.test/live.mp3")
     client = FakeClient(
@@ -59,6 +96,7 @@ def test_bridge_once_triggers_select_when_marker_is_not_playing() -> None:
     assert client.played == [station]
     assert client.playback_methods == ["dlna"]
     assert result["after"]["play_status"] == "PLAY_STATE"
+    assert result["playback_check"]["plausible"] is True
 
 
 def test_bridge_once_can_use_select_when_requested() -> None:

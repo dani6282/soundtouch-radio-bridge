@@ -58,3 +58,5 @@ def test_serve_defaults_to_websocket_bridge_without_recovery_polling() -> None:
     assert args.playback_method == "dlna"
     assert args.recovery_window == 0.0
     assert args.recovery_poll_interval == 0.1
+    assert args.diagnostic_followup_delay == 5.0
+    assert args.auto_recover is False

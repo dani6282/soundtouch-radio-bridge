@@ -216,13 +216,27 @@ The page provides:
 - direct play controls for each configured stream;
 - volume and transport controls;
 - listener status from the websocket bridge;
+- rolling listener diagnostics, including immediate and delayed playback
+  plausibility checks;
 - manual health checks for `/info`, `/now_playing`, `/nowSelection`, and
-  `/volume`.
+  `/volume`;
+- guarded recovery through the Recover button or `POST /api/recover`.
 
 The page refreshes status from the local `soundtouch-radio` process, not from
 the speaker. The Bose is only queried by user actions such as play, volume, and
 manual health checks, or by the websocket bridge itself. Station edits rewrite
 the configured TOML file atomically and preserve marker fields.
+
+Recovery first checks whether the expected stream is actually selected in
+`/now_playing`. If playback looks implausible, for example DLNA returned HTTP
+200 but the speaker stayed on AUX or STANDBY, recovery sends STOP, replays the
+target stream, and checks `/now_playing` again. Start `serve` with
+`--auto-recover` to run that low-risk recovery automatically after implausible
+bridge-triggered playback.
+
+There is no known deterministic SoundTouch software reboot API. The POWER key
+is only a toggle, so `/api/recover` uses it only when the JSON request includes
+`{"allow_power_toggle": true}`.
 
 An optional local speaker image can be shown without adding a site-specific
 asset to this package:

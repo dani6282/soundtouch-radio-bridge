@@ -27,6 +27,9 @@ services:
       - "0"
       - --settle
       - "1"
+      # Optional: run STOP + replay if a bridge-triggered stream stays on
+      # AUX/STANDBY after DLNA was accepted.
+      # - --auto-recover
     volumes:
       # Use :ro for a headless bridge. Use read-write if the web UI should
       # persist station name/URL edits.

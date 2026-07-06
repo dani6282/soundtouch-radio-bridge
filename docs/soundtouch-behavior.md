@@ -41,6 +41,14 @@ playback path in the tested setup.
 Use plain `http://` MP3 streams first. HLS, app-only streams, expiring tokens,
 and HTTPS-only endpoints may be device- or firmware-dependent.
 
+Observed failure mode: the DLNA renderer can return HTTP 200 while the speaker
+remains on `AUX` or `STANDBY` and `/now_playing` never moves to the target UPNP
+URL. A physical speaker reboot cleared that state in testing. The web runtime
+therefore records both immediate and delayed playback plausibility checks, and
+its recovery action performs a health check, STOP, target stream replay, and a
+second `/now_playing` check. The SoundTouch POWER key is a toggle rather than a
+deterministic reboot command, so it should not be used automatically.
+
 ## Polling
 
 Default bridge operation should be websocket-only:

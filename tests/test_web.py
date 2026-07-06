@@ -10,10 +10,17 @@ from soundtouch_radio.web import ControlPanelRuntime, create_control_panel_serve
 
 
 class FakeClient:
-    def __init__(self) -> None:
+    def __init__(self, *, now_playing_states: list[dict] | None = None) -> None:
         self.played = []
         self.volume_target = 25
         self.keys = []
+        self._now_playing_states = now_playing_states or [
+            {
+                "source": "UPNP",
+                "content_location": "http://example.test/live.mp3",
+                "play_status": "PLAY_STATE",
+            }
+        ]
 
     def play_station_dlna(self, station):
         self.played.append(station)
@@ -24,7 +31,9 @@ class FakeClient:
         return FakeResponse(status=200)
 
     def now_playing(self):
-        return {"source": "UPNP", "content_location": "http://example.test/live.mp3"}
+        if len(self._now_playing_states) == 1:
+            return self._now_playing_states[0]
+        return self._now_playing_states.pop(0)
 
     def now_selection(self):
         return {"preset_id": 1}
@@ -101,9 +110,55 @@ def test_control_panel_api_serves_status_and_actions(tmp_path: Path) -> None:
         key = _post_json(f"{base_url}/api/key", {"key": "mute"})
         assert key["key"] == "MUTE"
         assert client.keys == ["MUTE"]
+
+        recover = _post_json(f"{base_url}/api/recover", {})
+        assert recover["reason"] == "playback_plausible"
+        assert client.keys == ["MUTE"]
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_runtime_recovery_stops_and_replays_implausible_playback(tmp_path: Path) -> None:
+    config = _write_config(tmp_path)
+    device, stations = load_station_config(config)
+    client = FakeClient(
+        now_playing_states=[
+            {
+                "source": "AUX",
+                "content_location": "/local/aux",
+                "play_status": "PLAY_STATE",
+            },
+            {
+                "source": "AUX",
+                "content_location": "/local/aux",
+                "play_status": "PLAY_STATE",
+            },
+            {
+                "source": "UPNP",
+                "content_location": "http://example.test/live.mp3",
+                "play_status": "PLAY_STATE",
+            },
+        ]
+    )
+    runtime = ControlPanelRuntime(
+        config_path=config,
+        device=device,
+        stations=stations,
+        client=client,
+        settle=0,
+    )
+
+    play = runtime.play_slot(1)
+    result = runtime.recover_if_implausible()
+    diagnostics = runtime.snapshot()["bridge"]["diagnostics"]
+
+    assert play["playback_check"]["reason"] == "source_stayed_aux"
+    assert result["recovered"] is True
+    assert result["reason"] == "playback_plausible_after_stop_replay"
+    assert client.keys == ["STOP"]
+    assert [station.slot for station in client.played] == [1, 1]
+    assert diagnostics[-1]["kind"] == "recovery"
 
 
 def _write_config(tmp_path: Path) -> Path:

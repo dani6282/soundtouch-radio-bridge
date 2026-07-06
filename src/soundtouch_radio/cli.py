@@ -134,6 +134,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="seconds to wait after playback trigger before reading status",
     )
+    serve.add_argument(
+        "--diagnostic-followup-delay",
+        type=float,
+        default=5.0,
+        help="seconds after bridge-triggered playback to re-read now-playing",
+    )
+    serve.add_argument(
+        "--auto-recover",
+        action="store_true",
+        help="run STOP and replay the target stream when bridge playback looks implausible",
+    )
 
     bridge = subparsers.add_parser("bridge", help="bridge preset markers to web radio playback")
     bridge_sub = bridge.add_subparsers(dest="bridge_command", required=True)
@@ -217,6 +228,8 @@ def run(args: argparse.Namespace) -> Any:
             raise ValueError("--recovery-window must be 0 or greater")
         if args.recovery_poll_interval <= 0:
             raise ValueError("--recovery-poll-interval must be greater than 0")
+        if args.diagnostic_followup_delay < 0:
+            raise ValueError("--diagnostic-followup-delay must be 0 or greater")
         from .web import ControlPanelRuntime, run_control_panel
 
         runtime = ControlPanelRuntime(
@@ -226,6 +239,8 @@ def run(args: argparse.Namespace) -> Any:
             client=client,
             playback_method=args.playback_method,
             settle=args.settle,
+            diagnostic_followup_delay=args.diagnostic_followup_delay,
+            auto_recover=args.auto_recover,
         )
         run_control_panel(
             host=args.bind,
