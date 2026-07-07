@@ -23,6 +23,7 @@ from .bridge import (
     run_websocket_bridge,
 )
 from .config import save_station_config, station_by_slot
+from .diagnostics import DiagnosticRecorder
 from .models import DeviceConfig, Station
 from .soundtouch import SoundTouchClient
 
@@ -39,6 +40,7 @@ class ControlPanelRuntime:
         settle: float = 1.0,
         diagnostic_followup_delay: float = 5.0,
         auto_recover: bool = False,
+        diagnostic_recorder: DiagnosticRecorder | None = None,
     ) -> None:
         self.config_path = config_path
         self.device = device
@@ -48,6 +50,7 @@ class ControlPanelRuntime:
         self.settle = settle
         self.diagnostic_followup_delay = diagnostic_followup_delay
         self.auto_recover = auto_recover
+        self.diagnostic_recorder = diagnostic_recorder or DiagnosticRecorder()
         self.bridge_state = BridgeState()
         self._lock = threading.RLock()
         self._recovery_lock = threading.Lock()
@@ -57,6 +60,8 @@ class ControlPanelRuntime:
         self._last_play: dict[str, Any] | None = None
         self._last_volume: dict[str, Any] | None = None
         self._last_now_playing: dict[str, Any] | None = None
+        self._play_attempt_sequence = 0
+        self._current_play_attempt_id: int | None = None
         self._diagnostics: deque[dict[str, Any]] = deque(maxlen=30)
         self._bridge: dict[str, Any] = {
             "running": False,
@@ -76,6 +81,7 @@ class ControlPanelRuntime:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             bridge = dict(self._bridge)
+            bridge["current_play_attempt_id"] = self._current_play_attempt_id
             bridge["diagnostics"] = list(self._diagnostics)
             return {
                 "app": {
@@ -85,6 +91,7 @@ class ControlPanelRuntime:
                     "playback_method": self.playback_method,
                     "auto_recover": self.auto_recover,
                     "diagnostic_followup_delay": self.diagnostic_followup_delay,
+                    "diagnostic_log": self.diagnostic_recorder.snapshot(),
                 },
                 "device": _device_to_dict(self.device),
                 "stations": [station.to_dict() for station in self.stations],
@@ -125,6 +132,7 @@ class ControlPanelRuntime:
             status=response.status,
         )
         result = {
+            "play_attempt_id": None,
             "played": station.to_dict(),
             "method": self.playback_method,
             "status": response.status,
@@ -133,6 +141,7 @@ class ControlPanelRuntime:
             "played_at": _now_iso(),
         }
         with self._lock:
+            result["play_attempt_id"] = self._next_play_attempt_locked()
             self._last_play = result
             self._last_now_playing = now_playing
             self._append_diagnostic_locked(
@@ -144,6 +153,7 @@ class ControlPanelRuntime:
                     "playback_check": playback_check,
                 }
             )
+        self.diagnostic_recorder.record("manual_play", result=result)
         return result
 
     def health_check(self) -> dict[str, Any]:
@@ -187,6 +197,7 @@ class ControlPanelRuntime:
                     "errors": errors,
                 }
             )
+        self.diagnostic_recorder.record("health_check", result=result)
         return result
 
     def get_volume(self) -> dict[str, Any]:
@@ -206,9 +217,16 @@ class ControlPanelRuntime:
     def send_key(self, key: str) -> dict[str, Any]:
         result = self.client.send_key(key)
         result["sent_at"] = _now_iso()
+        self.diagnostic_recorder.record("key_command", result=result)
         return result
 
-    def recover_if_implausible(self, *, allow_power_toggle: bool = False) -> dict[str, Any]:
+    def recover_if_implausible(
+        self,
+        *,
+        allow_power_toggle: bool = False,
+        station: Station | None = None,
+        play_attempt_id: int | None = None,
+    ) -> dict[str, Any]:
         if not self._recovery_lock.acquire(blocking=False):
             return {
                 "ok": False,
@@ -218,14 +236,29 @@ class ControlPanelRuntime:
             }
         self._recovery_running = True
         try:
-            with self._lock:
-                station = self._expected_station_locked()
+            if play_attempt_id is not None and not self._play_attempt_is_current(play_attempt_id):
+                result = {
+                    "ok": False,
+                    "recovered": False,
+                    "reason": "stale_recovery",
+                    "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
+                    "station": station.to_dict() if station is not None else None,
+                    "actions": [],
+                }
+                self._record_recovery_result(result)
+                return result
+
+            if station is None:
+                with self._lock:
+                    station = self._expected_station_locked()
             if station is None:
                 result = {
                     "ok": False,
                     "recovered": False,
                     "reason": "no_expected_station",
                     "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
                     "actions": [],
                 }
                 self._record_recovery_result(result)
@@ -235,12 +268,58 @@ class ControlPanelRuntime:
             now_playing = health.get("data", {}).get("now_playing")
             initial_check = playback_check_for_station(station, now_playing)
             actions: list[dict[str, Any]] = []
+            if play_attempt_id is not None and not self._play_attempt_is_current(play_attempt_id):
+                result = {
+                    "ok": False,
+                    "recovered": False,
+                    "reason": "stale_recovery",
+                    "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
+                    "station": station.to_dict(),
+                    "initial_check": initial_check,
+                    "actions": actions,
+                    "health_check": health,
+                }
+                self._record_recovery_result(result)
+                return result
+
             if initial_check["plausible"]:
                 result = {
                     "ok": True,
                     "recovered": False,
                     "reason": "playback_plausible",
                     "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
+                    "station": station.to_dict(),
+                    "initial_check": initial_check,
+                    "actions": actions,
+                    "health_check": health,
+                }
+                self._record_recovery_result(result)
+                return result
+
+            if initial_check["observed_source"] == "STANDBY" and not allow_power_toggle:
+                result = {
+                    "ok": False,
+                    "recovered": False,
+                    "reason": "standby_not_recovered",
+                    "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
+                    "station": station.to_dict(),
+                    "initial_check": initial_check,
+                    "actions": actions,
+                    "health_check": health,
+                }
+                self._record_recovery_result(result)
+                return result
+
+            if play_attempt_id is not None and not self._play_attempt_is_current(play_attempt_id):
+                result = {
+                    "ok": False,
+                    "recovered": False,
+                    "reason": "stale_recovery",
+                    "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
                     "station": station.to_dict(),
                     "initial_check": initial_check,
                     "actions": actions,
@@ -252,6 +331,21 @@ class ControlPanelRuntime:
             stop = self.send_key("STOP")
             actions.append({"action": "key", "key": "STOP", "result": stop})
             time.sleep(1.0)
+
+            if play_attempt_id is not None and not self._play_attempt_is_current(play_attempt_id):
+                result = {
+                    "ok": False,
+                    "recovered": False,
+                    "reason": "stale_recovery_after_stop",
+                    "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
+                    "station": station.to_dict(),
+                    "initial_check": initial_check,
+                    "actions": actions,
+                    "health_check": health,
+                }
+                self._record_recovery_result(result)
+                return result
 
             replay = self._play_station(station)
             actions.append(
@@ -278,6 +372,7 @@ class ControlPanelRuntime:
                         else "power_toggle_not_allowed"
                     ),
                     "checked_at": _now_iso(),
+                    "play_attempt_id": play_attempt_id,
                     "station": station.to_dict(),
                     "initial_check": initial_check,
                     "after_replay": after_replay,
@@ -333,6 +428,7 @@ class ControlPanelRuntime:
                     else power_check["reason"]
                 ),
                 "checked_at": _now_iso(),
+                "play_attempt_id": play_attempt_id,
                 "station": station.to_dict(),
                 "initial_check": initial_check,
                 "after_replay": after_replay,
@@ -391,6 +487,16 @@ class ControlPanelRuntime:
         return thread
 
     def record_bridge_result(self, result: dict[str, Any]) -> None:
+        result = dict(result)
+        with self._lock:
+            if result.get("triggered"):
+                result["play_attempt_id"] = self._next_play_attempt_locked()
+            self._bridge["last_result"] = result
+            self._bridge["last_event_at"] = _now_iso()
+            self._bridge["last_update_at"] = _now_iso()
+            if result.get("after"):
+                self._last_now_playing = result["after"]
+            self._append_diagnostic_locked(_bridge_result_diagnostic(result))
         schedule_followup = bool(
             result.get("triggered") and result.get("station") and self.diagnostic_followup_delay > 0
         )
@@ -400,21 +506,27 @@ class ControlPanelRuntime:
             and result.get("playback_check")
             and not result["playback_check"].get("plausible")
         )
-        with self._lock:
-            self._bridge["last_result"] = result
-            self._bridge["last_event_at"] = _now_iso()
-            self._bridge["last_update_at"] = _now_iso()
-            if result.get("after"):
-                self._last_now_playing = result["after"]
-            self._append_diagnostic_locked(_bridge_result_diagnostic(result))
         if schedule_followup:
             self._schedule_followup_check(result)
-        if schedule_recovery:
-            self._schedule_recovery()
+        if schedule_recovery and _auto_recovery_allowed(result["playback_check"]):
+            self._schedule_recovery(
+                station=_station_from_data(result.get("station")),
+                play_attempt_id=result.get("play_attempt_id"),
+            )
+        self.diagnostic_recorder.record("bridge_result", result=result)
 
     def record_bridge_status(self, update: dict[str, Any]) -> None:
         event = update.get("event")
         now = _now_iso()
+        raw_message = update.get("raw_message")
+        status_update = {key: value for key, value in update.items() if key != "raw_message"}
+        if raw_message is not None:
+            self.diagnostic_recorder.record(
+                "websocket_message",
+                event_tags=update.get("event_tags") or [],
+                raw_message=raw_message,
+            )
+        self.diagnostic_recorder.record("listener_status", update=status_update)
         with self._lock:
             self._bridge["last_update_at"] = now
             if update.get("url"):
@@ -443,6 +555,8 @@ class ControlPanelRuntime:
                     "kind": "listener_status",
                     "event": event,
                     "url": update.get("url"),
+                    "connection_id": update.get("connection_id"),
+                    "event_tags": update.get("event_tags"),
                     "code": update.get("code"),
                     "message": update.get("message"),
                     "error": update.get("error"),
@@ -472,10 +586,23 @@ class ControlPanelRuntime:
     def _append_diagnostic_locked(self, entry: dict[str, Any]) -> None:
         self._diagnostics.append({"at": _now_iso(), **entry})
 
+    def _next_play_attempt_locked(self) -> int:
+        self._play_attempt_sequence += 1
+        self._current_play_attempt_id = self._play_attempt_sequence
+        return self._play_attempt_sequence
+
+    def _play_attempt_is_current(self, play_attempt_id: int) -> bool:
+        with self._lock:
+            return self._current_play_attempt_id == play_attempt_id
+
     def _schedule_followup_check(self, result: dict[str, Any]) -> None:
         station_data = result.get("station")
         if not isinstance(station_data, dict):
             return
+        station = _station_from_data(station_data)
+        if station is None:
+            return
+        play_attempt_id = result.get("play_attempt_id")
         expected_location = station_data.get("location")
         expected_source = station_data.get("source") or "UPNP"
         if not expected_location:
@@ -484,21 +611,47 @@ class ControlPanelRuntime:
         def run() -> None:
             time.sleep(self.diagnostic_followup_delay)
             try:
+                if isinstance(play_attempt_id, int) and not self._play_attempt_is_current(
+                    play_attempt_id
+                ):
+                    followup_result = {
+                        "checked_at": _now_iso(),
+                        "delay_seconds": self.diagnostic_followup_delay,
+                        "play_attempt_id": play_attempt_id,
+                        "station": _station_summary(station_data),
+                        "stale": True,
+                        "reason": "stale_followup",
+                    }
+                    with self._lock:
+                        self._bridge["last_followup_check"] = followup_result
+                        self._bridge["last_update_at"] = _now_iso()
+                        self._append_diagnostic_locked(
+                            {"kind": "followup_check", **followup_result}
+                        )
+                    self.diagnostic_recorder.record("followup_check", result=followup_result)
+                    return
+
                 now_playing = self.client.now_playing()
                 playback_check = playback_check_for_target(
                     expected_source=str(expected_source),
                     expected_location=str(expected_location),
                     now_playing=now_playing,
                 )
+                stale = isinstance(play_attempt_id, int) and not self._play_attempt_is_current(
+                    play_attempt_id
+                )
                 with self._lock:
-                    self._last_now_playing = now_playing
-                    self._bridge["last_followup_check"] = {
+                    followup_result = {
                         "checked_at": _now_iso(),
                         "delay_seconds": self.diagnostic_followup_delay,
+                        "play_attempt_id": play_attempt_id,
                         "station": _station_summary(station_data),
                         "now_playing": _now_playing_summary(now_playing),
                         "playback_check": playback_check,
+                        "stale": stale,
                     }
+                    self._last_now_playing = now_playing
+                    self._bridge["last_followup_check"] = followup_result
                     self._bridge["last_update_at"] = _now_iso()
                     self._append_diagnostic_locked(
                         {
@@ -509,22 +662,43 @@ class ControlPanelRuntime:
                             "playback_check": playback_check,
                         }
                     )
-                if self.auto_recover and not playback_check["plausible"]:
-                    self._schedule_recovery()
+                self.diagnostic_recorder.record("followup_check", result=followup_result)
+                if (
+                    self.auto_recover
+                    and not stale
+                    and not playback_check["plausible"]
+                    and _auto_recovery_allowed(playback_check)
+                ):
+                    self._schedule_recovery(
+                        station=station,
+                        play_attempt_id=(
+                            play_attempt_id if isinstance(play_attempt_id, int) else None
+                        ),
+                    )
             except Exception as exc:
                 with self._lock:
                     self._bridge["last_error"] = str(exc)
                     self._bridge["last_update_at"] = _now_iso()
                     self._append_diagnostic_locked({"kind": "followup_check", "error": str(exc)})
+                self.diagnostic_recorder.record("followup_check", error=str(exc))
 
         threading.Thread(target=run, name="soundtouch-radio-followup", daemon=True).start()
 
-    def _schedule_recovery(self) -> None:
+    def _schedule_recovery(
+        self,
+        *,
+        station: Station | None = None,
+        play_attempt_id: int | None = None,
+    ) -> None:
         if self._recovery_running:
             return
 
         def run() -> None:
-            self.recover_if_implausible(allow_power_toggle=False)
+            self.recover_if_implausible(
+                allow_power_toggle=False,
+                station=station,
+                play_attempt_id=play_attempt_id,
+            )
 
         threading.Thread(target=run, name="soundtouch-radio-recovery", daemon=True).start()
 
@@ -544,6 +718,7 @@ class ControlPanelRuntime:
                     "power_check": result.get("power_check"),
                 }
             )
+        self.diagnostic_recorder.record("recovery", result=result)
 
 
 def run_control_panel(
@@ -723,6 +898,7 @@ def _now_iso() -> str:
 def _bridge_result_diagnostic(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "bridge_result",
+        "play_attempt_id": result.get("play_attempt_id"),
         "triggered": result.get("triggered"),
         "reason": result.get("reason"),
         "trigger_source": result.get("trigger_source"),
@@ -745,6 +921,31 @@ def _station_summary(station: Any) -> dict[str, Any] | None:
     }
 
 
+def _station_from_data(station: Any) -> Station | None:
+    if not isinstance(station, dict):
+        return None
+    try:
+        return Station(
+            slot=int(station["slot"]),
+            name=str(station["name"]),
+            source=str(station.get("source") or "UPNP"),
+            type=station.get("type"),
+            location=str(station["location"]),
+            source_account=station.get("source_account"),
+            marker_source=station.get("marker_source"),
+            marker_location=station.get("marker_location"),
+            marker_source_account=station.get("marker_source_account"),
+            marker_type=station.get("marker_type"),
+            marker_name=station.get("marker_name"),
+            container_art=station.get("container_art"),
+            homepage=station.get("homepage"),
+            codec=station.get("codec"),
+            notes=station.get("notes"),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def _now_playing_summary(now_playing: Any) -> dict[str, Any] | None:
     if not isinstance(now_playing, dict):
         return None
@@ -755,6 +956,10 @@ def _now_playing_summary(now_playing: Any) -> dict[str, Any] | None:
         "station_name": now_playing.get("station_name"),
         "play_status": now_playing.get("play_status"),
     }
+
+
+def _auto_recovery_allowed(playback_check: dict[str, Any]) -> bool:
+    return playback_check.get("observed_source") != "STANDBY"
 
 
 INDEX_HTML = """<!doctype html>

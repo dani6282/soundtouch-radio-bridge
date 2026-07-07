@@ -256,8 +256,22 @@ def is_recovery_signal_xml(xml_text: str) -> bool:
     return _has_tag(root, "userActivityUpdate") or _has_tag(root, "errorUpdate")
 
 
+def event_tags_from_xml(xml_text: str) -> list[str]:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    if _local_name(root.tag) == "updates":
+        return [_local_name(child.tag) for child in list(root)]
+    return [_local_name(root.tag)]
+
+
 def _has_tag(root: ET.Element, tag: str) -> bool:
     return root.tag == tag or root.find(f".//{tag}") is not None
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _selection_node_to_dict(node: ET.Element) -> dict[str, Any]:

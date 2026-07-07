@@ -5,7 +5,12 @@ import threading
 from time import monotonic, sleep
 from typing import Any, Callable, Literal
 
-from .models import Station, is_recovery_signal_xml, parse_now_selection_update_xml
+from .models import (
+    Station,
+    event_tags_from_xml,
+    is_recovery_signal_xml,
+    parse_now_selection_update_xml,
+)
 from .soundtouch import SoundTouchClient, SoundTouchError
 
 PlaybackMethod = Literal["dlna", "select"]
@@ -332,6 +337,8 @@ def run_websocket_bridge(
     recovery_lock = threading.Lock()
     recovery_until = 0.0
     recovery_thread_running = False
+    connection_id = 0
+    active_connection_id = 0
 
     def notify_status(update: dict[str, Any]) -> None:
         if on_status is None:
@@ -345,7 +352,14 @@ def run_websocket_bridge(
         message_text = (
             message.decode("utf-8", errors="replace") if isinstance(message, bytes) else message
         )
-        notify_status({"event": "message"})
+        notify_status(
+            {
+                "event": "message",
+                "connection_id": active_connection_id,
+                "event_tags": event_tags_from_xml(message_text),
+                "raw_message": message_text,
+            }
+        )
         with trigger_lock:
             result = bridge_websocket_message(
                 client,
@@ -399,25 +413,43 @@ def run_websocket_bridge(
                 recovery_thread_running = False
 
     def reconnecting_websocket_loop() -> None:
+        nonlocal active_connection_id, connection_id
         notify_status({"event": "starting", "url": url})
         while True:
-            with trigger_lock:
-                initial_result = bridge_once(
-                    client,
-                    stations,
-                    state,
-                    cooldown=0,
-                    settle=settle,
-                    playback_method=playback_method,
+            connection_id += 1
+            current_connection_id = connection_id
+            active_connection_id = current_connection_id
+            try:
+                with trigger_lock:
+                    initial_result = bridge_once(
+                        client,
+                        stations,
+                        state,
+                        cooldown=0,
+                        settle=settle,
+                        playback_method=playback_method,
+                    )
+                if initial_result["triggered"]:
+                    on_result(initial_result)
+            except Exception as exc:
+                notify_status(
+                    {
+                        "event": "initial_check_error",
+                        "url": url,
+                        "connection_id": current_connection_id,
+                        "error": str(exc),
+                    }
                 )
-            if initial_result["triggered"]:
-                on_result(initial_result)
 
             def on_open(_ws: WebSocketApp) -> None:
-                notify_status({"event": "connected", "url": url})
+                notify_status(
+                    {"event": "connected", "url": url, "connection_id": current_connection_id}
+                )
 
             def on_error(_ws: WebSocketApp, error: Any) -> None:
-                notify_status({"event": "error", "error": str(error)})
+                notify_status(
+                    {"event": "error", "connection_id": current_connection_id, "error": str(error)}
+                )
 
             def on_close(
                 _ws: WebSocketApp,
@@ -427,12 +459,15 @@ def run_websocket_bridge(
                 notify_status(
                     {
                         "event": "disconnected",
+                        "connection_id": current_connection_id,
                         "code": close_status_code,
                         "message": close_msg,
                     }
                 )
 
-            notify_status({"event": "connecting", "url": url})
+            notify_status(
+                {"event": "connecting", "url": url, "connection_id": current_connection_id}
+            )
             ws = WebSocketApp(
                 url,
                 on_open=on_open,

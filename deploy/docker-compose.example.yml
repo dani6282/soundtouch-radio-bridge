@@ -25,14 +25,17 @@ services:
       - dlna
       - --recovery-window
       - "0"
+      - --diagnostic-log
+      - /app/diagnostics/soundtouch-radio.jsonl
       - --settle
       - "1"
       # Optional: run STOP + replay if a bridge-triggered stream stays on
-      # AUX/STANDBY after DLNA was accepted.
+      # AUX after DLNA was accepted. STANDBY is treated as intentional off.
       # - --auto-recover
     volumes:
       # Use :ro for a headless bridge. Use read-write if the web UI should
       # persist station name/URL edits.
       - ./stations.toml:/app/config/stations.toml
+      - ./diagnostics:/app/diagnostics
     security_opt:
       - no-new-privileges:true

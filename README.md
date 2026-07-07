@@ -175,7 +175,8 @@ Equivalent explicit form:
 soundtouch-radio --json --stations stations.toml bridge run \
   --mode websocket \
   --playback-method dlna \
-  --recovery-window 0
+  --recovery-window 0 \
+  --diagnostic-log diagnostics/soundtouch-radio.jsonl
 ```
 
 Optional bounded recovery window:
@@ -207,7 +208,8 @@ soundtouch-radio --stations stations.toml serve \
   --bind 0.0.0.0 \
   --web-port 8788 \
   --playback-method dlna \
-  --recovery-window 0
+  --recovery-window 0 \
+  --diagnostic-log diagnostics/soundtouch-radio.jsonl
 ```
 
 The page provides:
@@ -227,12 +229,19 @@ the speaker. The Bose is only queried by user actions such as play, volume, and
 manual health checks, or by the websocket bridge itself. Station edits rewrite
 the configured TOML file atomically and preserve marker fields.
 
+With `--diagnostic-log`, the runtime appends JSONL records containing raw
+websocket XML, listener lifecycle events, bridge decisions, health checks,
+follow-up checks, and recovery actions. Put this path on persistent storage when
+running in Docker. The file can include device identifiers, station URLs, and
+raw track/source metadata, so keep it on a trusted private host.
+
 Recovery first checks whether the expected stream is actually selected in
 `/now_playing`. If playback looks implausible, for example DLNA returned HTTP
-200 but the speaker stayed on AUX or STANDBY, recovery sends STOP, replays the
-target stream, and checks `/now_playing` again. Start `serve` with
+200 but the speaker stayed on AUX, recovery sends STOP, replays the target
+stream, and checks `/now_playing` again. Start `serve` with
 `--auto-recover` to run that low-risk recovery automatically after implausible
-bridge-triggered playback.
+bridge-triggered playback. `STANDBY` is treated as intentional off and is not
+auto-recovered.
 
 There is no known deterministic SoundTouch software reboot API. The POWER key
 is only a toggle, so `/api/recover` uses it only when the JSON request includes
@@ -287,6 +296,11 @@ Capture changing selection/playback state:
 ```sh
 uv run --extra dev python scripts/capture_state.py 192.0.2.10 --seconds 30
 ```
+
+Protocol, websocket, Home Assistant, and recovery behavior notes are maintained
+in [docs/soundtouch-behavior.md](docs/soundtouch-behavior.md).
+The bridge state-machine review and incident checklist are maintained in
+[docs/bridge-fsm-review.md](docs/bridge-fsm-review.md).
 
 Raw API escape hatch:
 

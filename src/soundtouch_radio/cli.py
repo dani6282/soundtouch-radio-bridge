@@ -10,6 +10,7 @@ import time
 
 from .bridge import DEFAULT_PLAYBACK_METHOD, BridgeState, bridge_once, run_websocket_bridge
 from .config import DEFAULT_CONFIG_PATH, load_station_config, parse_slots, station_by_slot
+from .diagnostics import DiagnosticRecorder
 from .models import (
     DeviceConfig,
     Station,
@@ -99,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--bind", default="127.0.0.1", help="web UI bind address")
     serve.add_argument("--web-port", type=int, default=8788, help="web UI port")
     serve.add_argument("--device-image", type=Path, help="optional speaker photo served by the UI")
+    serve.add_argument(
+        "--diagnostic-log",
+        type=Path,
+        help="optional JSONL path for raw websocket frames and bridge decisions",
+    )
     serve.add_argument("--no-bridge", action="store_true", help="serve UI without websocket bridge")
     serve.add_argument("--websocket-port", type=int, default=8080, help="SoundTouch websocket port")
     serve.add_argument(
@@ -177,6 +183,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--websocket-port", type=int, default=8080, help="SoundTouch websocket port"
     )
     bridge_run.add_argument(
+        "--diagnostic-log",
+        type=Path,
+        help="optional JSONL path for raw websocket frames and bridge decisions",
+    )
+    bridge_run.add_argument(
         "--playback-method",
         choices=["select", "dlna"],
         default=DEFAULT_PLAYBACK_METHOD,
@@ -241,6 +252,7 @@ def run(args: argparse.Namespace) -> Any:
             settle=args.settle,
             diagnostic_followup_delay=args.diagnostic_followup_delay,
             auto_recover=args.auto_recover,
+            diagnostic_recorder=DiagnosticRecorder(args.diagnostic_log),
         )
         run_control_panel(
             host=args.bind,
@@ -293,6 +305,7 @@ def run(args: argparse.Namespace) -> Any:
 
     if args.command == "bridge":
         if args.bridge_command == "run":
+            diagnostic_recorder = DiagnosticRecorder(args.diagnostic_log)
             state = BridgeState()
             if args.poll_interval <= 0:
                 raise ValueError("--poll-interval must be greater than 0")
@@ -301,7 +314,7 @@ def run(args: argparse.Namespace) -> Any:
             if args.recovery_poll_interval <= 0:
                 raise ValueError("--recovery-poll-interval must be greater than 0")
             if args.once:
-                return bridge_once(
+                result = bridge_once(
                     client,
                     stations,
                     state,
@@ -309,7 +322,14 @@ def run(args: argparse.Namespace) -> Any:
                     settle=args.settle,
                     playback_method=args.playback_method,
                 )
+                diagnostic_recorder.record("bridge_result", result=result)
+                return result
             if args.mode == "websocket":
+
+                def record_and_emit(result: dict[str, Any]) -> None:
+                    diagnostic_recorder.record("bridge_result", result=result)
+                    emit(result, as_json=args.json)
+
                 run_websocket_bridge(
                     client,
                     stations,
@@ -321,7 +341,8 @@ def run(args: argparse.Namespace) -> Any:
                     settle=args.settle,
                     playback_method=args.playback_method,
                     reconnect_interval=args.reconnect_interval,
-                    on_result=lambda result: emit(result, as_json=args.json),
+                    on_result=record_and_emit,
+                    on_status=lambda update: _record_bridge_status(diagnostic_recorder, update),
                 )
             while True:
                 result = bridge_once(
@@ -332,6 +353,7 @@ def run(args: argparse.Namespace) -> Any:
                     settle=args.settle,
                     playback_method=args.playback_method,
                 )
+                diagnostic_recorder.record("bridge_result", result=result)
                 if result["triggered"]:
                     emit(result, as_json=args.json)
                 time.sleep(args.poll_interval)
@@ -430,6 +452,18 @@ def _load_config_if_present(path: Path) -> tuple[DeviceConfig | None, list[Stati
     if not path.exists():
         return None, []
     return load_station_config(path)
+
+
+def _record_bridge_status(diagnostic_recorder: DiagnosticRecorder, update: dict[str, Any]) -> None:
+    raw_message = update.get("raw_message")
+    status_update = {key: value for key, value in update.items() if key != "raw_message"}
+    if raw_message is not None:
+        diagnostic_recorder.record(
+            "websocket_message",
+            event_tags=update.get("event_tags") or [],
+            raw_message=raw_message,
+        )
+    diagnostic_recorder.record("listener_status", update=status_update)
 
 
 if __name__ == "__main__":

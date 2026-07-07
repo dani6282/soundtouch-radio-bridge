@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from soundtouch_radio.models import (
     Station,
+    event_tags_from_xml,
     is_recovery_signal_xml,
     parse_info_xml,
     parse_now_selection_xml,
@@ -207,3 +208,21 @@ def test_is_recovery_signal_xml_ignores_selection_updates() -> None:
         )
         is False
     )
+
+
+def test_event_tags_from_xml_extracts_update_children() -> None:
+    tags = event_tags_from_xml(
+        """
+<updates>
+  <nowSelectionUpdated />
+  <volumeUpdated />
+</updates>
+"""
+    )
+
+    assert tags == ["nowSelectionUpdated", "volumeUpdated"]
+
+
+def test_event_tags_from_xml_handles_single_root_and_parse_errors() -> None:
+    assert event_tags_from_xml('<userActivityUpdate deviceID="abc" />') == ["userActivityUpdate"]
+    assert event_tags_from_xml("<not-xml") == []

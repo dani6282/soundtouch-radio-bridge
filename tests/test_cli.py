@@ -46,6 +46,14 @@ def test_bridge_recovery_polling_defaults_off() -> None:
     assert args.playback_method == "dlna"
     assert args.recovery_window == 0.0
     assert args.recovery_poll_interval == 0.1
+    assert args.diagnostic_log is None
+
+
+def test_bridge_accepts_diagnostic_log_path() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["bridge", "run", "--diagnostic-log", "work/bridge.jsonl"])
+
+    assert str(args.diagnostic_log) == "work/bridge.jsonl"
 
 
 def test_serve_defaults_to_websocket_bridge_without_recovery_polling() -> None:
@@ -60,3 +68,11 @@ def test_serve_defaults_to_websocket_bridge_without_recovery_polling() -> None:
     assert args.recovery_poll_interval == 0.1
     assert args.diagnostic_followup_delay == 5.0
     assert args.auto_recover is False
+    assert args.diagnostic_log is None
+
+
+def test_serve_accepts_diagnostic_log_path() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["serve", "--diagnostic-log", "work/serve.jsonl"])
+
+    assert str(args.diagnostic_log) == "work/serve.jsonl"
